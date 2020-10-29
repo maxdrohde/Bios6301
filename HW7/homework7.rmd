@@ -1,17 +1,17 @@
 ---
 title: 'Bios 6301: Assignment 7'
-output: pdf_document
+author: "Max Rohde"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
 ---
 
-*Due Thursday, 29 October, 1:00 PM*
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lubridate)
+```
 
-$5^{n=day}$ points taken off for each day late.
-
-40 points total.
-
-Submit a single knitr file (named `homework7.rmd`), along with a valid PDF output file. Inside the file, clearly indicate which parts of your responses go with which problems (you may use the original homework document as a template). Add your name as `author` to the file's metadata section. Raw R code/output or word processor files are not acceptable.
-
-Failure to name file `homework7.rmd` or include author name may result in 5 points taken off.
 
 ### Question 1 ###
 
@@ -42,12 +42,104 @@ x <- genData(500)
 Perform the following manipulations: (3 points each)
 
 1. Order the data set by `id` and `dt`.
+
+```{r}
+# Change name and convert to tibble
+df <- tibble(x)
+
+# Order by `id` and `dt`
+df %>%
+  arrange(id, dt) -> df
+
+df %>%
+  head(10) %>%
+  kableExtra::kable(booktabs=TRUE)
+```
+
 2. For each `id`, determine if there is more than a one year gap in between observations.  Add a new row at the one year mark, with the `a1c` value set to missing.  A two year gap would require two new rows, and so forth.
+
+```{r}
+# Create a column of difference in years between each timepoint
+df %>%
+  group_by(id) %>%
+  mutate(difference = c(dt %>% diff() %>% time_length(unit = "year"),0)) %>%
+  ungroup() -> df
+
+# Filter only to differences greater than 1 year, and take the floor()
+df %>%
+  filter(difference >= 1) %>%
+  mutate(difference = floor(difference)) -> diffs
+
+# Remove the differences column
+df <- df %>% select(-difference)
+
+# Iterate through the differences table
+# Add in the missing years
+for(i in 1:nrow(diffs)){
+  for(j in 1:diffs$difference[i]){
+    df <- df %>% add_row(id = diffs$id[i],
+                         dt = diffs$dt[i] + years(j),
+                         a1c = NA)
+  }
+}
+
+# Order by `id` and `dt`
+df %>%
+  arrange(id, dt) -> df
+
+# View first 50 rows
+df %>%
+  head(50) %>%
+  kableExtra::kable(booktabs=TRUE)
+```
+
 3. Create a new column `visit`.  For each `id`, add the visit number.  This should be 1 to `n` where `n` is the number of observations for an individual.  This should include the observations created with missing a1c values.
+
+```{r}
+df %>%
+  group_by(id) %>%
+  mutate(visit = 1:length(id)) -> df
+
+df %>%
+  head(20) %>%
+  kableExtra::kable(booktabs=TRUE)
+```
+
 4. For each `id`, replace missing values with the mean `a1c` value for that individual.
+
+```{r}
+df %>%
+  group_by(id) %>%
+  mutate(a1c = ifelse(is.na(a1c), mean(a1c,na.rm=TRUE),a1c)) -> df
+```
+
 5. Print mean `a1c` for each `id`.
+
+```{r}
+df %>%
+  group_by(id) %>%
+  summarise(mean_a1c = mean(a1c, na.rm = TRUE)) %>%
+  kableExtra::kable(booktabs=TRUE)
+```
+
 6. Print total number of visits for each `id`.
+
+```{r}
+df %>%
+  group_by(id) %>%
+  summarise(num_visit = max(visit)) %>%
+  kableExtra::kable(booktabs=TRUE)
+```
+
 7. Print the observations for `id = 15`.
+```{r}
+df %>%
+  filter(id == 15) %>%
+  kableExtra::kable(booktabs=TRUE)
+```
+
+
+
 
 ### Question 2 ###
 
@@ -63,6 +155,13 @@ head(sw_fry_1000)
 1. Remove all non-alphabetical characters and make all characters lowercase. Save the result as `a`.
 
 ```{r}
+sw_fry_1000 %>%
+  str_replace_all("\\W", "") %>%
+  str_to_lower() -> a
+
+# Examine the differences
+sw_fry_1000[sw_fry_1000 != a]
+a[sw_fry_1000 != a]
 ```
 
 Use vector `a` for the following questions. (2 points each)
@@ -70,36 +169,56 @@ Use vector `a` for the following questions. (2 points each)
 2. How many words contain the string "ar"?
 
 ```{r}
+str_detect(a, "ar") %>% sum()
+
+# We see that 64 words contain the string "ar"
 ```
 
 3. Find a six-letter word that starts with "l" and ends with "r".
 
 ```{r}
+a[str_detect(a, "^l.{4}r$")]
+
+# The only match is "letter"
 ```
 
 4. Return all words that start with "col" or end with "eck".
 
 ```{r}
+a[str_detect(a, "(^col|eck$)")]
 ```
 
 5. Find the number of words that contain 4 or more adjacent consonants. Assume "y" is always a consonant.
 
 ```{r}
+str_detect(a, "[^aeiou]{4,}") %>% sum()
+
+# 8 words fit this description
 ```
 
 6. Return all words with a "q" that isn't followed by a "ui".
 
 ```{r}
+a[str_detect(a, "q(?!ui)")]
 ```
 
 7. Find all words that contain a "k" followed by another letter. Run the `table` command on the first character following the first "k" of each word.
 
 ```{r}
+a[str_detect(a, "k.")]
+
+str_match(a, "k(.)")[,2] %>% table()
 ```
 
 8. Remove all vowels. How many character strings are found exactly once?
 
 ```{r}
+no_vowel <- str_replace_all(a, "[aeiou]","")
+
+(table(no_vowel) == 1) %>% sum()
+
+# There are 581 strings found exactly once
+
 ```
 
 ### Question 3 ###
@@ -131,6 +250,20 @@ tryCatch(myfun(haart_df, death), error = function(e) e)
 
 What do you think is going on?  Consider using `debug` to trace the problem.
 
+#### Answer
+
+The issue is that when `death` is passed into the function, R tries to interpret it as an object coming from the global namespace, where it doesn't exist, since it only exists in relation to the data frame.
+
 **5 bonus points**
 
 Create a working function.
+
+```{r}
+# Here is a working version using reformulate()
+myfun <- function(dat, response) {
+  form <- reformulate(".", deparse(substitute(response)))
+  coef(summary(glm(form, data=dat, family=binomial(logit))))
+}
+
+myfun(haart_df, death)
+```
