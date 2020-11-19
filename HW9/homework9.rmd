@@ -1,19 +1,26 @@
 ---
 title: 'Bios 6301: Assignment 9'
-output: pdf_document
+author: Max Rohde
+output:
+  pdf_document:
+    highlight: pygments
+    df_print: kable
 ---
 
-*Due Thursday, 19 November, 1:00 PM*
+```{r, echo=FALSE, message = FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE, error=FALSE, dev = "cairo_pdf")
+```
 
-$5^{n=day}$ points taken off for each day late.
+```{r}
+library(tidyverse)
+library(cowplot)
+library(glue)
+library(extrafont)
+library(directlabels)
+library(resample)
+```
 
-40 points total.
-
-Submit a single knitr file (named `homework9.rmd`), along with a valid PDF output file. Inside the file, clearly indicate which parts of your responses go with which problems (you may use the original homework document as a template). Add your name as `author` to the file's metadata section. Raw R code/output or word processor files are not acceptable.
-
-Failure to name file `homework9.rmd` or include author name may result in 5 points taken off.
-
-### Question 1 ###
+## Question 1 ##
 
 **15 points**
 
@@ -38,15 +45,63 @@ next_gen <- function(pop) {
 
 Use the function `next_gen` to generate nine generations (you already have the first), then use the function `hist` to plot the distribution of male heights in each generation (this will require multiple calls to `hist`). The phenomenon you see is called regression to the mean.  Provide (at least) minimal decorations such as title and x-axis labels.
 
-### Question 2 ###
+```{r, fig.height=3, fig.width=3}
+x <- list(pop)
+
+# Generate next 8 generations
+for (i in 1:8) {
+  x[i + 1] <- list(next_gen(x[[i]]))
+}
+
+for (i in 1:9) {
+  df <- x[[i]]
+  hist(df$m,
+    xlim = c(100, 200),
+    main = glue("Generation {i}"),
+    xlab = "Male height (cm)"
+  )
+}
+```
+
+
+```{r}
+# Here's a version for fun using ggplot
+
+# Merge into a single data frame
+df <- map_dfr(x, ~.x, .id = "generation")
+df$generation <- as.numeric(df$generation) %>% as.factor()
+
+# Generate the plot
+df %>%
+  ggplot(aes(x = m, color = generation, fill = generation)) +
+  geom_density(alpha = 0.1) +
+  theme_cowplot() +
+  labs(
+    title = "Regression to the mean across 10 generations",
+    x = "Male height (cm)",
+    y = "Kernel Density Estimate"
+  )
+```
+
+## Question 2 ##
 
 **10 points**
 
 Use the simulated results from question 1 to reproduce (as closely as possible) the following plot in ggplot2.
 
-![generations plot](http://d.pr/i/Xh0d+)
+```{r}
+df %>%
+  ggplot(aes(x = m, y = f)) +
+  geom_point(alpha = 0.2) +
+  facet_wrap(~generation) +
+  labs(
+    x = "Male Height (cm)",
+    y = "Female Height (cm)"
+  )
+```
 
-### Question 3 ###
+
+## Question 3 ##
 
 **15 points**
 
@@ -56,34 +111,73 @@ Starting with a sample size of 250, create a 95% bootstrap percentile interval f
 
 Produce a line chart that includes the bootstrapped mean and lower and upper percentile intervals for each group.  Add appropriate labels and a legend. (6 points)
 
-You may use base graphics or ggplot2.  It should look similar to this (in base).
-
-![bp interval plot](bpi.jpg)
-
-Here's an example of how you could create transparent shaded areas.
-
 ```{r}
-makeTransparent = function(..., alpha=0.5) {
-  if(alpha<0 | alpha>1) stop("alpha must be between 0 and 1")
-  alpha = floor(255*alpha)  
-  newColor = col2rgb(col=unlist(list(...)), alpha=FALSE)
-  .makeTransparent = function(col, alpha) {
-    rgb(red=col[1], green=col[2], blue=col[3], alpha=alpha, maxColorValue=255)
-  }
-  newColor = apply(newColor, 2, .makeTransparent, alpha=alpha)
-  return(newColor)
+set.seed(7)
+
+# A function to generate 95% Bootstrap intervals for the mean
+# Uses the `resample` package
+get_boot_ci <- function(x, boot_size) {
+  boot <- bootstrap(data = x, R = boot_size, statistic = mean)
+  ci <- CI.percentile(boot, probs = c(0.025, 0.975))
+  out <- tibble(ll = ci[1], ul = ci[2])
+  return(out)
 }
 
-par(new=FALSE)
-plot(NULL,
-  xlim=c(-1, 1),
-  ylim=c(-1, 1),
-  xlab="",
-  ylab=""
-)
+# Generates the mean and CIs for a given sample size
+generate <- function(n) {
+  boot_size <- 1000
+  group <- sample(c("Control", "Treatment"), n, replace = TRUE)
+  outcome <- rnorm(n, 60, 20)
+  outcome[group == "Treatment"] <- outcome[group == "Treatment"] + 5
 
-polygon(x=c(seq(-0.75, 0.25, length.out=100), seq(0.25, -0.75, length.out=100)),
-        y=c(rep(-0.25, 100), rep(0.75, 100)), border=NA, col=makeTransparent('blue',alpha=0.5))
-polygon(x=c(seq(-0.25, 0.75, length.out=100), seq(0.75, -0.25, length.out=100)),
-        y=c(rep(-0.75, 100), rep(0.25, 100)), border=NA, col=makeTransparent('red',alpha=0.5))
+  df <- tibble(group, outcome)
+
+  df %>%
+    group_by(group) %>%
+    summarize(
+      mean = mean(outcome),
+      get_boot_ci(outcome, boot_size)
+    ) %>%
+    mutate(
+      sample_size = n,
+      boot_size = boot_size
+    ) -> out
+}
+
+# Generate the data for each sample size
+df <- map_df(seq(250, 2500, by = 250), ~ generate(.x))
+
+head(df)
 ```
+
+
+```{r}
+# Plot the data
+df %>%
+  group_by(group, sample_size) %>%
+  ggplot(aes(x = sample_size, y = mean, color = group)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ll, ymax = ul, fill = group), alpha = 0.3, size = 0) +
+  scale_color_brewer(palette = "Dark2") +
+  scale_fill_brewer(palette = "Dark2") +
+  theme_cowplot() +
+  annotate(
+    geom = "text", x = 2350, y = 67, label = "Treatment",
+    color = "#d85e01", family = "Source Sans Pro"
+  ) +
+  annotate(
+    geom = "text", x = 2350, y = 61.5, label = "Control",
+    color = "#1c9e77", family = "Source Sans Pro"
+  ) +
+  theme(
+    text = element_text(size = 12, family = "Source Sans Pro"),
+    legend.position = "none"
+  ) +
+  labs(
+    title = "95% Bootstrap intervals for increasing sample sizes",
+    x = "Sample Size",
+    y = "Mean"
+  )
+```
+
